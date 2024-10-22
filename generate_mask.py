@@ -4,6 +4,7 @@ from PIL import Image
 from tqdm import tqdm
 import numpy as np
 import torch
+from torch.cuda.amp import autocast
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 from torch.utils.data import DataLoader
@@ -11,6 +12,8 @@ import torchvision
 from torchvision import transforms
 from torchvision.utils import save_image
 from ldm.data.personalized import Personalized_mvtec_mask
+
+
 def load_model_from_config(config, ckpt, verbose=False):
     print(f"Loading model from {ckpt}")
     pl_sd = torch.load(ckpt, map_location="cpu")
@@ -100,6 +103,11 @@ if __name__ == "__main__":
         required=True,
         help="whether use ht encoder",
     )
+    parser.add_argument(
+        "--batch_size",
+        default=32,
+        help="batch size when sampling",
+    )
 
     opt = parser.parse_args()
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune.yaml")
@@ -113,21 +121,24 @@ if __name__ == "__main__":
     sampler = DDIMSampler(model)
     cnt=0
     dataset = Personalized_mvtec_mask(opt.data_root, sample_name, anomaly_name,repeats=10000)
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=False, drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False, drop_last=True)
     save_dir='generated_mask/%s/%s'%(sample_name,anomaly_name)
     os.makedirs(save_dir,exist_ok=True)
     with torch.no_grad():
-        for i in range(1000):
-            for idx, batch in enumerate(dataloader):
-                if cnt>500:
-                    exit()
-                with model.ema_scope():
-                    images=model.log_images(batch,sample=True,inpaint=False,unconditional_only=True,ddim_steps=100)
-                    masks=images['samples_scaled']
-                    for idx2,mask in enumerate(masks):
-                        mask=mask.mean(0).unsqueeze(0)
-                        mask=(mask>0.8).float()
-                        flag=check_mask(mask)
-                        if flag:
-                            save_image(mask,os.path.join(save_dir,'%d.jpg'%cnt))
-                            cnt+=1
+        for idx, batch in enumerate(dataloader):
+            with model.ema_scope():
+                with autocast():
+                    images=model.log_images(batch, N=opt.batch_size, sample=True,inpaint=False,unconditional_only=True,ddim_steps=50)
+                masks=images['samples_scaled']
+                for idx2,mask in enumerate(masks):
+                    mask=mask.mean(0).unsqueeze(0)
+                    mask=(mask>0.8).float()
+                    flag=check_mask(mask)
+                    if flag:
+                        save_image(mask,os.path.join(save_dir,'%d.jpg'%cnt))
+                        cnt+=1
+                        if cnt > 100:
+                            break
+            if cnt > 100:
+                break
+

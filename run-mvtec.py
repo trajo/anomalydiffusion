@@ -28,7 +28,7 @@ for dir1 in dirs1:
         dirs=os.listdir(os.path.join(root_dir,dir1,'test'))
         for dir2 in dirs:
             if dir2!='good':
-                os.system('CUDA_VISIBLE_DEVICES=%d python train_mask.py --mvtec_path=%s --base configs/latent-diffusion/txt2img-1p4B-finetune.yaml -t --actual_resume ./models/ldm/text2img-large/model.ckpt  -n test --gpus 0, --init_word crack --sample_name=%s --anomaly_name=%s'%(opt.gpu_id,opt.data_path,dir1,dir2))
+                #os.system('CUDA_VISIBLE_DEVICES=%d python train_mask.py --mvtec_path=%s --base configs/latent-diffusion/txt2img-1p4B-finetune.yaml -t --actual_resume ./models/ldm/text2img-large/model.ckpt  -n test --gpus 0, --init_word crack --sample_name=%s --anomaly_name=%s'%(opt.gpu_id,opt.data_path,dir1,dir2))
                 os.system(
                     'CUDA_VISIBLE_DEVICES=%d python generate_mask.py --data_root=%s --sample_name=%s --anomaly_name=%s --data_root=%s'%(opt.gpu_id,opt.data_path,dir1,dir2,root_dir))
                 if opt.adaptive_mask:

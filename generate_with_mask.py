@@ -4,6 +4,7 @@ from PIL import Image
 from tqdm import tqdm
 import numpy as np
 import torch
+from torch.cuda.amp import autocast
 from ldm.util import instantiate_from_config
 
 from ldm.models.diffusion.ddim import DDIMSampler
@@ -103,6 +104,12 @@ if __name__ == "__main__":
         action="store_true", default=False,
         help='whether use adaptive attention reweighting',
     )
+    parser.add_argument(
+        "--batch_size",
+        default=32,
+        help="batch size when sampling",
+    )
+
 
     # setup_seed(42)
     opt = parser.parse_args()
@@ -120,7 +127,7 @@ if __name__ == "__main__":
     model.embedding_manager.load('logs/anomaly-checkpoints/checkpoints/embeddings.pt')
     dataset = Positive_sample_with_generated_mask(opt.data_root,sample_name, anomaly_name, repeats=1, size=256, set='train',
                                                       per_image_tokens=False)
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=False, drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False, drop_last=False)
     save_dir = 'generated_dataset/%s/%s' % (sample_name, anomaly_name)
     os.makedirs(save_dir,exist_ok=True)
     os.makedirs(os.path.join(save_dir,'image'), exist_ok=True)
@@ -129,26 +136,25 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(save_dir, 'ori'), exist_ok=True)
     os.makedirs(os.path.join(save_dir, 'recon'), exist_ok=True)
     cnt=0
-    with torch.no_grad():
-        for epoch in range(1000):
-            for idx, batch in enumerate(dataloader):
-                if cnt>500:
-                    exit()
-                with model.ema_scope():
-                    mask=batch['mask'].cpu()
-                    ori_images=batch['image'].permute(0,3,1,2)
-                    images=model.log_images(batch,sample=False,inpaint=True,unconditional_only=True,adaptive_mask=opt.adaptive_mask)
-                    imgs=images['samples_inpainting'].cpu()
-                    recon_image=images['reconstruction']
-                    for i in range(len(imgs)):
-                        save_image((imgs[i] + 1) / 2, os.path.join(save_dir, 'image', '%d.jpg' % cnt), normalize=False)
-                        save_image((ori_images[i] + 1) / 2, os.path.join(save_dir, 'ori', '%d.jpg' % cnt),
-                                   normalize=False)
-                        save_image((recon_image[i]+1) / 2, os.path.join(save_dir, 'recon', '%d.jpg' % cnt),
-                                   normalize=False)
-                        save_image(mask[i], os.path.join(save_dir, 'mask','%d.jpg' % cnt))
-                        save_image(torch.stack([(imgs[i]+1)/2,mask[i].repeat(3,1,1)],dim=0), os.path.join(save_dir, 'image-mask', '%d.jpg' % cnt))
-                        cnt+=1
+    with torch.inference_mode():
+        for idx, batch in enumerate(dataloader):
+            if cnt>500:
+                exit()
+            with model.ema_scope():
+                mask=batch['mask'].cpu()
+                ori_images=batch['image'].permute(0,3,1,2)
+                images=model.log_images(batch,N=opt.batch_size,sample=False,inpaint=True,unconditional_only=True,adaptive_mask=opt.adaptive_mask,ddim_steps=50)
+                imgs=images['samples_inpainting'].cpu()
+                recon_image=images['reconstruction']
+                for i in range(len(imgs)):
+                    save_image((imgs[i] + 1) / 2, os.path.join(save_dir, 'image', '%d.jpg' % cnt), normalize=False)
+                    save_image((ori_images[i] + 1) / 2, os.path.join(save_dir, 'ori', '%d.jpg' % cnt),
+                               normalize=False)
+                    save_image((recon_image[i]+1) / 2, os.path.join(save_dir, 'recon', '%d.jpg' % cnt),
+                               normalize=False)
+                    save_image(mask[i], os.path.join(save_dir, 'mask','%d.jpg' % cnt))
+                    save_image(torch.stack([(imgs[i]+1)/2,mask[i].repeat(3,1,1)],dim=0), os.path.join(save_dir, 'image-mask', '%d.jpg' % cnt))
+                    cnt+=1
 
 #python generate_with_mask.py --sample_name=screw --anomaly_name=thread_side --adaptive_mask
 #python generate_with_mask.py --sample_name=wood --anomaly_name=color --adaptive_mask
